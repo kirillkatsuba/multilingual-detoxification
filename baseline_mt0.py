@@ -113,6 +113,7 @@ class MT0Detoxifier:
                 diversity_penalty=2.5,
                 num_return_sequences=1,
                 early_stopping=True,
+                trust_remote_code=True
             )
         return self.tokenizer.batch_decode(outputs, skip_special_tokens=True)
 

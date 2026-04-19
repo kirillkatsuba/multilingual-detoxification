@@ -69,7 +69,10 @@ class MT0Detoxifier:
         """
         self.device = torch.device("cuda" if torch.cuda.is_available() 
                                    else ("mps" if torch.backends.mps.is_available() else "cpu"))
-        self.model = AutoModelForSeq2SeqLM.from_pretrained(model_name).to(self.device)
+        self.model = AutoModelForSeq2SeqLM.from_pretrained(
+            model_name,
+            torch_dtype=torch.bfloat16,
+            trust_remote_code=True).to(self.device)
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
 
         self.lang_prompts = {
@@ -106,7 +109,7 @@ class MT0Detoxifier:
             outputs = self.model.generate(
                 **encodings,
                 max_length=128,
-                num_beams=10,
+                num_beams=5,
                 no_repeat_ngram_size=3,
                 repetition_penalty=1.2,
                 num_beam_groups=5,

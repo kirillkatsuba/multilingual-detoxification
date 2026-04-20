@@ -33,7 +33,7 @@ def main() -> dict[Any, Any]:
         help="Optional path to reference texts TSV file",
     )
     parser.add_argument(
-        "--device", type=str, default="cuda", help="Device for computations"
+        "--device", type=str, default="cpu", help="Device for computations"
     )
     parser.add_argument(
         "--batch_size",

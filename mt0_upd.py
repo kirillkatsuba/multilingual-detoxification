@@ -19,37 +19,24 @@ OUTPUT_DATA_PATH: str = Path(FILE_PATH.parent.parent.parent, "output_data")
 # ==============================================================================
 
 def get_toxic_lexicon() -> set:
-    """
-    Download the official PAN 2025 multilingual toxic lexicon from 
-    HuggingFace ('textdetox/multilingual_toxic_lexicon') and load it here.
-    """
-    # Load dataset with local caching
-    ds = load_dataset(
-        "textdetox/multilingual_toxic_lexicon",
-        split="train",
-        trust_remote_code=True
-    )
+    print("Downloading PAN 2025 Multilingual Toxic Lexicon...")
+    # Load the official lexicon from HuggingFace (loads all splits)
+    dataset_dict = load_dataset("textdetox/multilingual_toxic_lexicon")
     
-    # The dataset typically contains a 'word' column with toxic terms
-    # across multiple languages (EN, RU, UK, ES, DE, IT, FR, HE, HI, 
-    # JA, TT, AM, AR, ZH, and more)
-    column = None
-    for col in ("word", "text", "toxic_word", "term"):
-        if col in ds.column_names:
-            column = col
-            break
+    toxic_words = set()
     
-    if column is None:
-        # If no known column, use the first string column
-        column = ds.column_names[0]
-    
-    # Build the lexicon set (lowercased and stripped)
-    lexicon = set()
-    for item in ds[column]:
-        if isinstance(item, str) and item.strip():
-            lexicon.add(item.strip().lower())
-    
-    return lexicon
+    # Iterate over all the language splits ('en', 'es', 'ru', 'tt', etc.)
+    for split_name in dataset_dict.keys():
+        for row in dataset_dict[split_name]:
+            # Extract the word safely. It tries 'text', then 'word', 
+            # and falls back to the first column if the name is different.
+            word = row.get('text', row.get('word', list(row.values())[0]))
+            
+            if word:
+                toxic_words.add(str(word).lower().strip())
+                
+    print(f"Loaded {len(toxic_words)} toxic words from {len(dataset_dict.keys())} languages.")
+    return toxic_words
 
 
 # ==============================================================================

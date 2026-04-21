@@ -1,17 +1,17 @@
 import argparse
 import gc
 from pathlib import Path
-from typing import List, Literal
+from typing import List
 
 import pandas as pd
 import torch
+import langid
 from tqdm.auto import tqdm
 from transformers import AutoModelForSeq2SeqLM, AutoModelForCausalLM, AutoTokenizer
 from sentence_transformers import SentenceTransformer, util
-from lingua import LanguageDetectorBuilder, Language
 
 # ---------------------------------------------------------
-# 1. MT0 Short Prompts (Because mT0 fails with long instructions)
+# 1. MT0 Short Prompts
 # ---------------------------------------------------------
 MT0_PROMPTS = {
     "zh": "排毒：", "es": "Desintoxicar: ", "ru": "Детоксифицируй: ",
@@ -22,7 +22,7 @@ MT0_PROMPTS = {
 }
 
 # ---------------------------------------------------------
-# 2. Qwen Strict Prompts (Qwen understands system instructions)
+# 2. Qwen Strict Prompts
 # ---------------------------------------------------------
 QWEN_INSTRUCTIONS = {
     "en": "Task: Detoxify the following English text. Rewrite it to be completely neutral, removing all profanity while strictly preserving the original meaning. Reply only in English.",
@@ -40,15 +40,6 @@ QWEN_INSTRUCTIONS = {
     "hin": "Task: Detoxify the following Hinglish text. Rewrite it to be completely neutral, removing all profanity while strictly preserving the original meaning. You MUST reply strictly in Hinglish (Roman script).",
     "am": "Task: Detoxify the following Amharic text. Rewrite it to be completely neutral, removing all profanity while strictly preserving the original meaning. You MUST reply strictly in Amharic script.",
     "tt": "Task: Detoxify the following Tatar text. Rewrite it to be completely neutral, removing all profanity while strictly preserving the original meaning. You MUST reply strictly in Tatar (Cyrillic script)."
-}
-
-# Mapping dataset lang codes to Lingua Language Enum for the Ranker
-LINGUA_MAP = {
-    "en": Language.ENGLISH, "es": Language.SPANISH, "ru": Language.RUSSIAN, 
-    "zh": Language.CHINESE, "ja": Language.JAPANESE, "ar": Language.ARABIC, 
-    "fr": Language.FRENCH, "it": Language.ITALIAN, "de": Language.GERMAN, 
-    "uk": Language.UKRAINIAN, "he": Language.HEBREW, "hi": Language.HINDI,
-    "am": Language.AMHARIC, "tt": Language.TATAR
 }
 
 def free_memory():
@@ -124,7 +115,7 @@ def run_qwen(df: pd.DataFrame, batch_size: int = 8) -> List[str]:
     return results
 
 # ==============================================================================
-# The Ranker (Selects Best Output)
+# The Ranker (Selects Best Output using langid)
 # ==============================================================================
 def run_ranker(df: pd.DataFrame) -> List[str]:
     print("\n--- [Pass 3/3] Ranking Candidates ---")
@@ -133,10 +124,6 @@ def run_ranker(df: pd.DataFrame) -> List[str]:
     # Load Semantic Similarity Model
     print("Loading LaBSE for Meaning Preservation checks...")
     labse = SentenceTransformer("sentence-transformers/LaBSE").to(device)
-    
-    # Load Language Detector
-    languages = [v for k, v in LINGUA_MAP.items()]
-    lang_detector = LanguageDetectorBuilder.from_languages(*languages).build()
     
     best_sentences =[]
     
@@ -151,17 +138,14 @@ def run_ranker(df: pd.DataFrame) -> List[str]:
         sim_mt0 = util.cos_sim(embeddings[0], embeddings[1]).item()
         sim_qwen = util.cos_sim(embeddings[0], embeddings[2]).item()
         
-        # 2. Check for Language Drift (Did Qwen hallucinate English?)
-        target_lingua = LINGUA_MAP.get(lang)
-        qwen_is_english = False
-        if target_lingua and target_lingua != Language.ENGLISH:
-            detected_qwen = lang_detector.detect_language_of(cand_qwen)
-            if detected_qwen == Language.ENGLISH:
-                qwen_is_english = True
+        # 2. Check for Language Drift using langid
+        # We only care if Qwen accidentally translated a non-English sentence into English
+        if lang != "en":
+            detected_lang, _ = langid.classify(cand_qwen)
+            if detected_lang == "en":
                 sim_qwen -= 0.5  # Massive penalty for translating to English
         
         # 3. Select Winner
-        # If Qwen has a higher similarity score and didn't accidentally translate to English, pick Qwen. Otherwise, fallback to mT0.
         if sim_qwen > sim_mt0:
             best_sentences.append(cand_qwen)
         else:
